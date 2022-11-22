@@ -1,0 +1,178 @@
+name: Build and Test
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+    branches:
+      - main
+      - dev
+
+concurrency:
+  group: "${{ github.head_ref || github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Setup and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: 3.8
+          # cache: pip
+          # cache-dependency-path: setup.py
+
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install module
+        run: pip install .[tests]
+
+      - name: Test with pytest
+        run: pytest
+
+  deploy-dev:
+    name: Deploy to GCF
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/dev'
+    environment:
+      name: dev
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: ⬇️ Set up code
+        uses: actions/checkout@v3
+
+      - name: 🗝️ Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0
+        with:
+          create_credentials_file: true
+          token_format: access_token
+          workload_identity_provider: ${{ secrets.IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT_EMAIL }}
+
+      - name: 🚀 Deploy to Cloud Function
+        id: deploy
+        uses: google-github-actions/deploy-cloud-functions@v0
+        with:
+          name: projectname-skid
+          runtime: python38
+          entry_point: main
+          source_dir: src/skidname
+          service_account_email: cloud-function-sa@${{ secrets.PROJECT_ID }}.iam.gserviceaccount.com
+          event_trigger_type: providers/cloud.pubsub/eventTypes/topic.publish
+          event_trigger_resource: projects/${{ secrets.PROJECT_ID }}/topics/monday-morning-topic
+          deploy_timeout: 600
+          memory_mb: 512
+          timeout: 240
+          env_vars: STORAGE_BUCKET=${{secrets.STORAGE_BUCKET}}
+          secret_volumes: |
+            /secrets/app/secrets.json=${{secrets.PROJECT_ID}}/app_secrets
+
+      - name: 📥 Create PubSub topic
+        run: |
+          if [ ! "$(gcloud pubsub topics list | grep monday-morning-topic)" ]; then
+            gcloud pubsub topics create monday-morning-topic --quiet
+          fi
+
+      - name: 🕰️ Create Cloud Scheduler
+        run: |
+          if [ ! "$(gcloud scheduler jobs list --location=us-central1 | grep monday-morning)" ]; then
+            gcloud scheduler jobs create pubsub monday-morning \
+              --description="Trigger the projectname-skid bot once a week on monday morning" \
+              --schedule="0 9 * * 1" \
+              --time-zone=America/Denver \
+              --location=us-central1 \
+              --topic=monday-morning-topic \
+              --message-body='{"run": "now"}' \
+              --quiet
+          else
+            gcloud scheduler jobs update pubsub monday-morning \
+              --description="Trigger the projectname-skid bot once a week on monday morning" \
+              --schedule="0 9 * * 1" \
+              --time-zone=America/Denver \
+              --location=us-central1 \
+              --topic=monday-morning-topic \
+              --message-body='{"run": "now"}' \
+              --quiet
+          fi
+
+  deploy-prod:
+    name: Deploy to GCF
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: prod
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: ⬇️ Set up code
+        uses: actions/checkout@v3
+
+      - name: 🗝️ Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v0
+        with:
+          create_credentials_file: true
+          token_format: access_token
+          workload_identity_provider: ${{ secrets.IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT_EMAIL }}
+
+      - name: 🚀 Deploy to Cloud Function
+        id: deploy
+        uses: google-github-actions/deploy-cloud-functions@v0
+        with:
+          name: projectname-skid
+          runtime: python38
+          entry_point: main
+          source_dir: src/projectname
+          service_account_email: cloud-function-sa@${{ secrets.PROJECT_ID }}.iam.gserviceaccount.com
+          event_trigger_type: providers/cloud.pubsub/eventTypes/topic.publish
+          event_trigger_resource: projects/${{ secrets.PROJECT_ID }}/topics/monday-morning-topic
+          deploy_timeout: 600
+          memory_mb: 512
+          timeout: 240
+          env_vars: STORAGE_BUCKET=${{secrets.STORAGE_BUCKET}}
+          secret_volumes: |
+            /secrets/app/secrets.json=${{secrets.PROJECT_ID}}/app_secrets
+            /secrets/ftp/known_hosts=${{secrets.PROJECT_ID}}/known_hosts
+
+      - name: 📥 Create PubSub topic
+        run: |
+          if [ ! "$(gcloud pubsub topics list | grep monday-morning-topic)" ]; then
+            gcloud pubsub topics create monday-morning-topic --quiet
+          fi
+
+      - name: 🕰️ Create Cloud Scheduler
+        run: |
+          if [ ! "$(gcloud scheduler jobs list --location=us-central1 | grep monday-morning)" ]; then
+            gcloud scheduler jobs create pubsub monday-morning \
+              --description="Trigger the projectname-skid bot once a week on monday morning" \
+              --schedule="0 9 * * 1" \
+              --time-zone=America/Denver \
+              --location=us-central1 \
+              --topic=monday-morning-topic \
+              --message-body='{"run": "now"}' \
+              --quiet
+          else
+            gcloud scheduler jobs update pubsub monday-morning \
+              --description="Trigger the projectname-skid bot once a week on monday morning" \
+              --schedule="0 9 * * 1" \
+              --time-zone=America/Denver \
+              --location=us-central1 \
+              --topic=monday-morning-topic \
+              --message-body='{"run": "now"}' \
+              --quiet
+          fi
