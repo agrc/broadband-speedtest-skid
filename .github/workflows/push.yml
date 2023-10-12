@@ -21,14 +21,14 @@ jobs:
 
     steps:
       - name: Set up Python
-        uses: actions/setup-python@v3
+        uses: actions/setup-python@v4
         with:
           python-version: 3.8
           # cache: pip
           # cache-dependency-path: setup.py
 
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install module
         run: pip install .[tests]
@@ -49,11 +49,11 @@ jobs:
 
     steps:
       - name: ⬇️ Set up code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: 🗝️ Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0
+        uses: google-github-actions/auth@v1
         with:
           create_credentials_file: true
           token_format: access_token
@@ -62,7 +62,7 @@ jobs:
 
       - name: 🚀 Deploy to Cloud Function
         id: deploy
-        uses: google-github-actions/deploy-cloud-functions@v0
+        uses: google-github-actions/deploy-cloud-functions@v1
         with:
           name: projectname-skid
           runtime: python38
@@ -119,11 +119,11 @@ jobs:
 
     steps:
       - name: ⬇️ Set up code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: 🗝️ Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v0
+        uses: google-github-actions/auth@v1
         with:
           create_credentials_file: true
           token_format: access_token
@@ -132,7 +132,7 @@ jobs:
 
       - name: 🚀 Deploy to Cloud Function
         id: deploy
-        uses: google-github-actions/deploy-cloud-functions@v0
+        uses: google-github-actions/deploy-cloud-functions@v1
         with:
           name: projectname-skid
           runtime: python38
