@@ -1,6 +1,6 @@
 # UGRC Palletjack Skid Starter Tempalate
 
-![Build Status](https://github.com/agrc/skidname/workflows/Build%20and%20Test/badge.svg)
+[![Push Events](https://github.com/agrc/broadband-speedtest-skid/actions/workflows/push.yml/badge.svg)](https://github.com/agrc/broadband-speedtest-skid/actions/workflows/push.yml)
 
 A template for building skids that use palletjack to update AGOL data from a tabular data source and that are run as Google Cloud Functions
 
