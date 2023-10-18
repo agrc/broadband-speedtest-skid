@@ -2,7 +2,7 @@
 # -*- encoding: utf-8 -*-
 """
 setup.py
-A module that installs the SKIDNAME skid as a module
+A module that installs the broadband speedtest skid as a module
 """
 from glob import glob
 from os.path import basename, splitext
@@ -11,17 +11,17 @@ from setuptools import find_packages, setup
 
 #: Load version from source file
 version = {}
-with open('src/skidname/version.py') as fp:
+with open('src/bb_speed/version.py') as fp:
     exec(fp.read(), version)
 
 setup(
-    name='skidname',
+    name='bb_speed',
     version=version['__version__'],
     license='MIT',
-    description='Update the PROJECTNAME data from SOURCE via GCF',
+    description='Update the speedtest data from geopartners\' XML via GCF',
     author='UGRC',
     author_email='ugrc@utah.gov',
-    url='https://github.com/agrc/skid',
+    url='https://github.com/agrc/broadband-speedtest-skid',
     packages=find_packages('src'),
     package_dir={'': 'src'},
     py_modules=[splitext(basename(path))[0] for path in glob('src/*.py')],
@@ -60,6 +60,6 @@ setup(
         'pytest-runner',
     ],
     entry_points={'console_scripts': [
-        'skidname = skidname.main:main',
+        'bb_speed = bb_speed.main:main',
     ]},
 )
