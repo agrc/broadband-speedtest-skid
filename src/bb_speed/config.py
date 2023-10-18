@@ -16,10 +16,25 @@ SENDGRID_SETTINGS = {  #: Settings for SendGridHandler
 LOG_LEVEL = logging.DEBUG
 LOG_FILE_NAME = 'log'
 
-FEATURE_LAYER_ITEMID = ''
+SPEEDTEST_BASE_URL = 'https://expressoptimizer.net/APIgetstate.php'
+# SPEEDTEST_URL_PARAMS = {'state': 'Utah', 'record': '0'}
+
+CENSUS_URL = 'https://api.census.gov/data/2021/acs/acs5/profile'
+CENSUS_PARAMS = {'get': 'DP02_0001E', 'for': 'county:*', 'in': 'state:49'}
+
+#: If this list is populated, remove any points that have these values in their isp column
+INSTITUTIONS_TO_REMOVE = [
+    'State of Utah',
+    'Utah Education Network',
+    'Utah State University',
+    'University of Utah',
+    'Salt Lake City Corporation',
+    'Brigham Young University',
+    'Salt Lake Community College',
+]
+
+FEATURE_LAYER_ITEMID = 'abf5150619294eb182f6cc0a669ff0ff'
 JOIN_COLUMN = ''
 ATTACHMENT_LINK_COLUMN = ''
 ATTACHMENT_PATH_COLUMN = ''
-FIELDS = {
-
-}
+FIELDS = {}

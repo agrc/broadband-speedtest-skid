@@ -13,9 +13,11 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 import arcgis
+import h3.api.numpy_int as h3
+import numpy as np
 import pandas as pd
-from palletjack import extract, transform, load, utils
 import requests
+from palletjack import transform, load
 from supervisor.message_handlers import SendGridHandler
 from supervisor.models import MessageDetails, Supervisor
 
@@ -138,15 +140,49 @@ def process():
         module_logger = logging.getLogger(config.SKID_NAME)
 
         #: Get our GIS object via the ArcGIS API for Python
-        gis = arcgis.gis.GIS(config.AGOL_ORG, secrets.AGOL_USER, secrets.AGOL_PASSWORD)
+        # gis = arcgis.gis.GIS(config.AGOL_ORG, secrets.AGOL_USER, secrets.AGOL_PASSWORD)
+        gis = arcgis.gis.GIS(config.AGOL_ORG, secrets.AGOL_USER)
 
-        base_url = 'https://expressoptimizer.net/APIgetstate.php'
-        params = {'state': 'Utah', 'record': '0'}
-        speedtest_df = _load_speedtest_data(base_url, params)
-        cleaned_df = _classify_speedtest_data(speedtest_df)
-        #########################################################################
-        #: Use the various palletjack classes and other code to do your work here
-        #########################################################################
+        module_logger.info('Loading new and live data...')
+        live_df = transform.FeatureServiceMerging.get_live_dataframe(gis, config.FEATURE_LAYER_ITEMID)
+        latest_id = live_df['id'].max()
+        new_data_df = _load_speedtest_data(config.SPEEDTEST_BASE_URL, {'state': 'Utah', 'record': f'{latest_id+1}'})
+        # new_data_df = speedtest_df[~speedtest_df['id'].isin(list(live_df['id']))]
+
+        module_logger.info('Classifying and cleaning new data...')
+        cleaned_df = _classify_speedtest_data(new_data_df)
+
+        if config.INSTITUTIONS_TO_REMOVE:
+            cleaned_df = cleaned_df[~cleaned_df['ispinfo'].isin(config.INSTITUTIONS_TO_REMOVE)].copy()
+            cleaned_df.reset_index(inplace=True, drop=True)
+            cleaned_df.spatial.set_geometry('SHAPE')
+
+        module_logger.info('Jittering new points...')
+        module_logger.debug('Projecting data to UTM')
+        cleaned_df.spatial.project(26912)
+        cleaned_df.spatial.sr = {'wkid': 26912}
+
+        module_logger.debug('Jittering')
+        cleaned_df[['new_SHAPE']] = cleaned_df.groupby('h3_12').apply(_jitter_df, (-150, 150), (-20, 20))
+        jittered_df = cleaned_df.drop(columns='SHAPE').rename(columns={'new_SHAPE': 'SHAPE'}, copy=True)
+        jittered_df.spatial.set_geometry('SHAPE')
+
+        module_logger.debug('Projecting data back to WGS84')
+        jittered_df.spatial.project(4326)
+        jittered_df.spatial.sr = {'wkid': 4326}
+
+        upload_df = transform.DataCleaning.switch_to_float(jittered_df, ['id'])
+        upload_df.drop(
+            columns=['email', 'ip', 'cost', 'ASN', 'longitude', 'latitude', 'coop', 'tribal', 'h3_12', 'wouldpay'],
+            inplace=True,
+            errors='ignore'
+        )
+
+        type_changes = {'blockid': float, 'mnc': float, 'repeats': float, 'mcc': float}
+        upload_df = upload_df.astype(type_changes)
+
+        module_logger.info('Uploading new points...')
+        added_features = load.FeatureServiceUpdater.add_features(gis, config.FEATURE_LAYER_ITEMID, upload_df)
 
         end = datetime.now()
 
@@ -161,6 +197,7 @@ def process():
             f'Duration: {str(end-start)}',
             #: Add other rows here containing summary info captured/calculated during the working portion of the skid,
             #: like the number of rows updated or the number of successful attachment overwrites.
+            f'{added_features} new points added'
         ]
 
         summary_message.message = '\n'.join(summary_rows)
@@ -211,13 +248,13 @@ def assign_h3(df, resolution):
 
 def _load_speedtest_data(base_url, params):
 
-    response = requests.get(base_url, params=params)
+    response = requests.get(base_url, params=params, timeout=60)
     cleaned_response = response.text.replace('\n', '')
 
     data_df = pd.read_xml(cleaned_response)
     spatial_data = pd.DataFrame.spatial.from_xy(data_df, 'longitude', 'latitude')
 
-    for resolution in [5, 6, 7, 8, 9]:
+    for resolution in [5, 6, 7, 8, 9, 12]:
         assign_h3(spatial_data, resolution)
 
     return spatial_data
@@ -232,8 +269,59 @@ def _classify_speedtest_data(speedtest_df):
     ]
     choices = ['above 100/20', 'between 100/20 and 25/3', 'under 25/3']
     speedtest_df['classification'] = np.select(conditions, choices, default='n/a')
-    if 'email' in speedtest_df.columns:
-        speedtest_df.drop(columns='email', inplace=True)
+
+    return speedtest_df
+
+
+def _jitter_df(dataframe, group_range, individual_range):
+    """Shifts a collection of points by a common random distance and then each point by an individual random distance
+
+    Should be .apply()'d to a groupby on a spatially-enabled dataframe. The grouping should gather points that are
+    extremely close together/identical into groups (like points that share an h3 key at level 12). The two-step group
+    then individual shift reduces the ability to identify the precise center of a bunch of common points (like multiple
+    records at a single home or apartment building) by randomizing the origin point that the individual points'
+    jittering starts from.
+
+    The ranges must make sense for the projection your data are in. Recommend projecting lat/long data into something
+    that uses feet/meters for ease of explaining the jitter distances.
+
+    Args:
+        dataframe (pd.DataFrame): Collection of points to be shifted; usually the individual groupings from a .groupby
+            operation
+        group_range (Tuple[int]): Min and max values to create new independent x and y shifts for the whole group
+        individual_range (Tuple[int]): Min and max values to create new independent x and y shifts for each point.
+
+    Returns:
+        pd.DataFrame: A single-column dataframe containing the new, shifted geometries.
+    """
+
+    group_jitter = tuple(map(lambda x: random.randint(*group_range), range(2)))
+    #: The apply below returns a series, which is then recast to a dataframe so that the return is easily concatted
+    new_shape = pd.DataFrame(dataframe.apply(_jitter_row, args=(group_jitter, individual_range), axis=1))
+    return new_shape
+
+
+def _jitter_row(series, group_jitter, individual_range):
+    #: returns a scalar (a new shape dict)
+    group_x, group_y = group_jitter
+    individual_x, individual_y = map(lambda x: random.randint(*individual_range), range(2))
+    #: without .copy(), shape is just a reference to the original dict and thus we're mutating the original data
+    shape = series['SHAPE'].copy()
+    shape['x'] = shape['x'] + group_x + individual_x
+    shape['y'] = shape['y'] + group_y + individual_y
+    return shape
+
+
+def _load_census_data(base_url, params):
+
+    response = requests.get(base_url, params=params, timeout=60)
+    dataframe = pd.DataFrame(response.json())
+
+    #: First row is the column names
+    dataframe.columns = dataframe.iloc[0]
+    dataframe = dataframe[1:].copy()
+
+    return dataframe
 
 
 def testing():
@@ -263,5 +351,5 @@ def testing():
 
 #: Putting this here means you can call the file via `python main.py` and it will run. Useful for pre-GCF testing.
 if __name__ == '__main__':
-    # process()
-    testing()
+    process()
+    # testing()
