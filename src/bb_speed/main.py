@@ -6,13 +6,10 @@ Run the speedtest script as a cloud function.
 import json
 import logging
 import sys
-from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import arcgis
-import google.auth
-from google.cloud import bigquery
 from palletjack import transform, load
 
 #: This makes it work when calling with just `python <file>`/installing via pip and in the gcf framework, where
