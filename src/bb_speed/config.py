@@ -17,7 +17,6 @@ LOG_LEVEL = logging.DEBUG
 LOG_FILE_NAME = 'log'
 
 SPEEDTEST_BASE_URL = 'https://expressoptimizer.net/APIgetstate.php'
-# SPEEDTEST_URL_PARAMS = {'state': 'Utah', 'record': '0'}
 
 CENSUS_URL = 'https://api.census.gov/data/2021/acs/acs5/profile'
 CENSUS_PARAMS = {'get': 'DP02_0001E', 'for': 'county:*', 'in': 'state:49'}
@@ -35,7 +34,3 @@ INSTITUTIONS_TO_REMOVE = [
 
 FEATURE_LAYER_ITEMID = 'abf5150619294eb182f6cc0a669ff0ff'
 COUNTIES_ITEMID = '07cdf8a74e7e4c4e93c854f281cdff5f'
-JOIN_COLUMN = ''
-ATTACHMENT_LINK_COLUMN = ''
-ATTACHMENT_PATH_COLUMN = ''
-FIELDS = {}
