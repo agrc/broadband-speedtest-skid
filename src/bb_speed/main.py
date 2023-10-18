@@ -143,10 +143,9 @@ def process():
         # gis = arcgis.gis.GIS(config.AGOL_ORG, secrets.AGOL_USER, secrets.AGOL_PASSWORD)
         gis = arcgis.gis.GIS(config.AGOL_ORG, secrets.AGOL_USER)
 
-        module_logger.info('Loading new and live data...')
+        #: Speedtest data
+        module_logger.info('Loading new and live speedtest data...')
         live_df = transform.FeatureServiceMerging.get_live_dataframe(gis, config.FEATURE_LAYER_ITEMID)
-        # latest_id = live_df['id'].max()
-        # new_data_df = _load_speedtest_data(config.SPEEDTEST_BASE_URL, {'state': 'Utah', 'record': f'{latest_id+1}'})
         speedtest_df = _load_speedtest_data(config.SPEEDTEST_BASE_URL, {'state': 'Utah', 'record': '0'})
         new_data_df = speedtest_df[~speedtest_df['id'].isin(list(live_df['id']))]
 
@@ -185,6 +184,27 @@ def process():
         module_logger.info('Uploading new points...')
         added_features = load.FeatureServiceUpdater.add_features(gis, config.FEATURE_LAYER_ITEMID, upload_df)
 
+        #: County Summaries
+        module_logger.info('Updating county summaries...')
+        module_logger.debug('Downloading and calculating new county data...')
+        census_household_info_df = _load_census_data(config.CENSUS_URL, config.CENSUS_PARAMS)
+        all_tests_df = speedtest_df.copy()
+        if config.INSTITUTIONS_TO_REMOVE:
+            all_tests_df = all_tests_df[~all_tests_df['ispinfo'].isin(config.INSTITUTIONS_TO_REMOVE)].copy()
+        county_info_df = _calc_county_summary(census_household_info_df, all_tests_df)
+
+        module_logger.debug('Merging into live county data...')
+        live_counties_df = transform.FeatureServiceMerging.get_live_dataframe(gis, config.COUNTIES_ITMEID)
+        merged_df = transform.FeatureServiceMerging.update_live_data_with_new_data(
+            live_counties_df, county_info_df, 'name'
+        )
+        merged_df.drop(columns=['SHAPE'], inplace=True)
+        merged_df = transform.DataCleaning.switch_to_float(merged_df, ['tests'])
+
+        updated_counties = load.FeatureServiceUpdater.update_features(
+            gis, config.COUNTIES_ITMEID, merged_df, update_geometry=False
+        )
+
         end = datetime.now()
 
         summary_message = MessageDetails()
@@ -198,7 +218,8 @@ def process():
             f'Duration: {str(end-start)}',
             #: Add other rows here containing summary info captured/calculated during the working portion of the skid,
             #: like the number of rows updated or the number of successful attachment overwrites.
-            f'{added_features} new points added'
+            f'{added_features} new points added',
+            f'{updated_counties} counties\' summaries updated'
         ]
 
         summary_message.message = '\n'.join(summary_rows)
@@ -373,7 +394,7 @@ def _calc_county_summary(household_df, all_tests_df):
     county_summary = (pd.DataFrame(all_tests_df.groupby('county')['id'].count())
                         .reset_index()
                         .merge(household_df, left_on='county', right_on='name')
-                        .drop(columns=['name'])
+                        .drop(columns=['county'])
                         .rename(columns={'id': 'tests'}))
     # yapf: enable
     county_summary['total_households'] = county_summary['total_households'].astype(int)
@@ -382,32 +403,6 @@ def _calc_county_summary(household_df, all_tests_df):
     return county_summary
 
 
-def testing():
-    test_df = pd.DataFrame({
-        'id': [15, 16, 17],
-        'h3_12': [1, 1, 2],
-        'SHAPE': [{
-            'x': 1,
-            'y': 1
-        }, {
-            'x': 5,
-            'y': 5
-        }, {
-            'x': 10,
-            'y': 10
-        }],
-    })
-    initial_range = (0, 1)
-    grouping_col = 'h3_12'
-    x_sign = 1 if random.random() < 0.5 else -1
-    y_sign = 1 if random.random() < 0.5 else -1
-    x_jitter = x_sign * random.randint(*initial_range)
-    y_jitter = y_sign * random.randint(*initial_range)
-    new_df = pd.DataFrame()
-    test_df.groupby(grouping_col)['SHAPE'].transform(lambda x: print(x))
-
-
 #: Putting this here means you can call the file via `python main.py` and it will run. Useful for pre-GCF testing.
 if __name__ == '__main__':
     process()
-    # testing()

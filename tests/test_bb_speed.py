@@ -51,9 +51,9 @@ def test_calc_county_summary(mocker):
     summary_df = main._calc_county_summary(households_df, speedtests_df)
 
     test_df = pd.DataFrame({
-        'county': ['Utah County', 'Weber County'],
         'tests': [2, 2],
         'total_households': [20, 10],
+        'name': ['Utah County', 'Weber County'],
         'percent_response': [.1, .2],
     })
 
