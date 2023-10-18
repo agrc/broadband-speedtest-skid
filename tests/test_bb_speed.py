@@ -2,7 +2,7 @@ import pytest
 import pandas as pd
 import pandas.testing as tm
 
-from bb_speed import main
+from bb_speed import main, helpers
 
 
 def test_get_secrets_from_gcp_location(mocker):
@@ -26,10 +26,10 @@ def test_get_secrets_from_local_location(mocker):
 
 
 def test_load_census_data(mocker):
-    requests_mock = mocker.patch('bb_speed.main.requests')
+    requests_mock = mocker.patch('bb_speed.helpers.requests')
     requests_mock.get.return_value.json.return_value = [['DP02_0001E', 'state', 'county'], ['87802', '49', '057']]
 
-    output_df = main._load_census_data('', '')
+    output_df = helpers.load_census_data('', '')
 
     test_df = pd.DataFrame([['87802', 'Weber County']], columns=['total_households', 'name'])
 
@@ -48,7 +48,7 @@ def test_calc_county_summary(mocker):
         'id': [1, 1, 1, 1]
     })
 
-    summary_df = main._calc_county_summary(households_df, speedtests_df)
+    summary_df = helpers.calc_county_summary(households_df, speedtests_df)
 
     test_df = pd.DataFrame({
         'tests': [2, 2],
