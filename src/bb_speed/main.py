@@ -121,20 +121,10 @@ def _remove_log_file_handlers(log_name, loggers):
                 pass
 
 
-def _update_speedtest_points(gis):
-
-    module_logger.info('Loading new and live speedtest data...')
-    live_df = transform.FeatureServiceMerging.get_live_dataframe(gis, config.FEATURE_LAYER_ITEMID)
-    speedtest_df = helpers.load_speedtest_data(config.SPEEDTEST_BASE_URL, {'state': 'Utah', 'record': '0'})
-    new_data_df = speedtest_df[~speedtest_df['id'].isin(list(live_df['id']))]
+def _update_speedtest_points(gis, new_data_df):
 
     module_logger.info('Classifying and cleaning new data...')
     cleaned_df = helpers.classify_speedtest_data(new_data_df)
-
-    if config.INSTITUTIONS_TO_REMOVE:
-        cleaned_df = cleaned_df[~cleaned_df['ispinfo'].isin(config.INSTITUTIONS_TO_REMOVE)].copy()
-        cleaned_df.reset_index(inplace=True, drop=True)
-        cleaned_df.spatial.set_geometry('SHAPE')
 
     module_logger.info('Jittering new points...')
     module_logger.debug('Projecting data to UTM')
@@ -150,7 +140,9 @@ def _update_speedtest_points(gis):
     jittered_df.spatial.project(4326)
     jittered_df.spatial.sr = {'wkid': 4326}
 
-    upload_df = transform.DataCleaning.switch_to_float(jittered_df, ['id'])
+    jittered_df['test_date'] = jittered_df['timestamp']  #: copy the timestamp field for new datetime-aware field
+    upload_df = transform.DataCleaning.switch_to_datetime(jittered_df, ['test_date'])
+    upload_df = transform.DataCleaning.switch_to_float(upload_df, ['id'])
     upload_df.drop(
         columns=['email', 'ip', 'cost', 'ASN', 'longitude', 'latitude', 'coop', 'tribal', 'h3_12', 'wouldpay'],
         inplace=True,
@@ -163,7 +155,7 @@ def _update_speedtest_points(gis):
     module_logger.info('Uploading new points...')
     added_features = load.FeatureServiceUpdater.add_features(gis, config.FEATURE_LAYER_ITEMID, upload_df)
 
-    return speedtest_df, added_features
+    return added_features
 
 
 def _update_counties(gis, speedtest_df):
@@ -209,23 +201,40 @@ def process():
         # gis = arcgis.gis.GIS(config.AGOL_ORG, secrets.AGOL_USER, secrets.AGOL_PASSWORD)
         gis = arcgis.gis.GIS(config.AGOL_ORG, secrets.AGOL_USER)
 
-        #: Speedtest data
-        speedtest_df, added_features = _update_speedtest_points(gis)
-        module_logger.debug('%s speedtest points added', added_features)
+        module_logger.info('Loading new and live speedtest data...')
+        live_df = transform.FeatureServiceMerging.get_live_dataframe(gis, config.FEATURE_LAYER_ITEMID)
+        speedtest_df = helpers.load_speedtest_data(config.SPEEDTEST_BASE_URL, {'state': 'Utah', 'record': '0'})
 
-        #: County Summaries
-        updated_counties = _update_counties(gis, speedtest_df)
-        module_logger.debug('%s county summaries updated', updated_counties)
+        #: Filter out existing and institutional records
+        new_data_df = speedtest_df[~speedtest_df['id'].isin(list(live_df['id']))]
+        if config.INSTITUTIONS_TO_REMOVE:
+            new_data_df = new_data_df[~new_data_df['ispinfo'].isin(config.INSTITUTIONS_TO_REMOVE)].copy()
+            new_data_df.reset_index(inplace=True, drop=True)
+            new_data_df.spatial.set_geometry('SHAPE')
+
+        added_features = updated_counties = 0  #: init to 0 in case no adds necessary
+        if not new_data_df.empty:
+            #: Speedtest data
+            added_features = _update_speedtest_points(gis, new_data_df)
+            module_logger.debug('%s speedtest points added', added_features)
+
+            #: County Summaries
+            updated_counties = _update_counties(gis, speedtest_df)
+            module_logger.debug('%s county summaries updated', updated_counties)
 
         end = datetime.now()
 
         summary_message = MessageDetails()
         summary_message.subject = f'{config.SKID_NAME} Update Summary'
         summary_rows = [
-            f'{config.SKID_NAME} update {start.strftime("%Y-%m-%d")}', '=' * 20, '',
-            f'Start time: {start.strftime("%H:%M:%S")}', f'End time: {end.strftime("%H:%M:%S")}',
-            f'Duration: {str(end-start)}', f'{added_features} new points added',
-            f'{updated_counties} counties\' summaries updated'
+            f'{config.SKID_NAME} update {start.strftime("%Y-%m-%d")}',
+            '=' * 20,
+            '',
+            f'Start time: {start.strftime("%H:%M:%S")}',
+            f'End time: {end.strftime("%H:%M:%S")}',
+            f'Duration: {str(end-start)}',
+            f'{added_features} new points added',
+            f'{updated_counties} counties\' summaries updated',
         ]
 
         summary_message.message = '\n'.join(summary_rows)
