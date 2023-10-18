@@ -83,7 +83,7 @@ jobs:
           timeout: 240
           env_vars: STORAGE_BUCKET=${{secrets.STORAGE_BUCKET}}
           secret_volumes: |
-            /secrets/app/secrets.json=${{secrets.PROJECT_ID}}/skid_secrets
+            /secrets/app/secrets.json=${{secrets.PROJECT_ID}}/skid-secrets
 
       - name: 📥 Create PubSub topic
         run: |
@@ -153,8 +153,7 @@ jobs:
           timeout: 240
           env_vars: STORAGE_BUCKET=${{secrets.STORAGE_BUCKET}}
           secret_volumes: |
-            /secrets/app/secrets.json=${{secrets.PROJECT_ID}}/app_secrets
-            /secrets/ftp/known_hosts=${{secrets.PROJECT_ID}}/known_hosts
+            /secrets/app/secrets.json=${{secrets.PROJECT_ID}}/skid_secrets
 
       - name: 📥 Create PubSub topic
         run: |
