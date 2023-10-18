@@ -8,22 +8,20 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 import arcgis
+import google.auth
+from google.cloud import bigquery
 from palletjack import transform, load
-from supervisor.message_handlers import SendGridHandler
-from supervisor.models import MessageDetails, Supervisor
 
 #: This makes it work when calling with just `python <file>`/installing via pip and in the gcf framework, where
 #: the relative imports fail because of how it's calling the function.
 try:
-    from . import config, helpers, version
+    from . import config, helpers
 except ImportError:
     import config
     import helpers
-    import version
 
 module_logger = logging.getLogger(config.SKID_NAME)
 
@@ -53,15 +51,8 @@ def _get_secrets():
     raise FileNotFoundError('Secrets folder not found; secrets not loaded.')
 
 
-def _initialize(log_path, sendgrid_api_key):
-    """A helper method to set up logging and supervisor
-
-    Args:
-        log_path (Path): File path for the logfile to be written
-        sendgrid_api_key (str): The API key for sendgrid for this particular application
-
-    Returns:
-        Supervisor: The supervisor object used for sending messages
+def _initialize():
+    """A helper method to set up logging
     """
 
     skid_logger = logging.getLogger(config.SKID_NAME)
@@ -76,49 +67,13 @@ def _initialize(log_path, sendgrid_api_key):
     )
     cli_handler.setFormatter(formatter)
 
-    log_handler = logging.FileHandler(log_path, mode='w')
-    log_handler.setLevel(config.LOG_LEVEL)
-    log_handler.setFormatter(formatter)
-
     skid_logger.addHandler(cli_handler)
-    skid_logger.addHandler(log_handler)
     palletjack_logger.addHandler(cli_handler)
-    palletjack_logger.addHandler(log_handler)
 
     #: Log any warnings at logging.WARNING
     #: Put after everything else to prevent creating a duplicate, default formatter
     #: (all log messages were duplicated if put at beginning)
     logging.captureWarnings(True)
-
-    skid_logger.debug('Creating Supervisor object')
-    skid_supervisor = Supervisor(handle_errors=False)
-    sendgrid_settings = config.SENDGRID_SETTINGS
-    sendgrid_settings['api_key'] = sendgrid_api_key
-    skid_supervisor.add_message_handler(
-        SendGridHandler(
-            sendgrid_settings=sendgrid_settings, client_name=config.SKID_NAME, client_version=version.__version__
-        )
-    )
-
-    return skid_supervisor
-
-
-def _remove_log_file_handlers(log_name, loggers):
-    """A helper function to remove the file handlers so the tempdir will close correctly
-
-    Args:
-        log_name (str): The logfiles filename
-        loggers (List<str>): The loggers that are writing to log_name
-    """
-
-    for logger in loggers:
-        for handler in logger.handlers:
-            try:
-                if log_name in handler.stream.name:
-                    logger.removeHandler(handler)
-                    handler.close()
-            except Exception as error:
-                pass
 
 
 def _update_speedtest_points(gis, new_data_df):
@@ -185,66 +140,33 @@ def process():
     """The main function that does all the work.
     """
 
-    #: Set up secrets, tempdir, supervisor, and logging
-    start = datetime.now()
-
+    #: Set up logging, secrets
+    _initialize()
     secrets = SimpleNamespace(**_get_secrets())
 
-    with TemporaryDirectory() as tempdir:
-        tempdir_path = Path(tempdir)
-        log_name = f'{config.LOG_FILE_NAME}_{start.strftime("%Y%m%d-%H%M%S")}.txt'
-        log_path = tempdir_path / log_name
+    #: Get our GIS object via the ArcGIS API for Python
+    gis = arcgis.gis.GIS(config.AGOL_ORG, secrets.AGOL_USER, secrets.AGOL_PASSWORD)
 
-        skid_supervisor = _initialize(log_path, secrets.SENDGRID_API_KEY)
+    module_logger.info('Loading new and live speedtest data...')
+    live_df = transform.FeatureServiceMerging.get_live_dataframe(gis, config.FEATURE_LAYER_ITEMID)
+    speedtest_df = helpers.load_speedtest_data(config.SPEEDTEST_BASE_URL, {'state': 'Utah', 'record': '0'})
 
-        #: Get our GIS object via the ArcGIS API for Python
-        gis = arcgis.gis.GIS(config.AGOL_ORG, secrets.AGOL_USER, secrets.AGOL_PASSWORD)
-        # gis = arcgis.gis.GIS(config.AGOL_ORG, secrets.AGOL_USER)
+    #: Filter out existing and institutional records
+    new_data_df = speedtest_df[~speedtest_df['id'].isin(list(live_df['id']))]
+    if config.INSTITUTIONS_TO_REMOVE:
+        new_data_df = new_data_df[~new_data_df['ispinfo'].isin(config.INSTITUTIONS_TO_REMOVE)].copy()
+        new_data_df.reset_index(inplace=True, drop=True)
+        new_data_df.spatial.set_geometry('SHAPE')
 
-        module_logger.info('Loading new and live speedtest data...')
-        live_df = transform.FeatureServiceMerging.get_live_dataframe(gis, config.FEATURE_LAYER_ITEMID)
-        speedtest_df = helpers.load_speedtest_data(config.SPEEDTEST_BASE_URL, {'state': 'Utah', 'record': '0'})
+    added_features = updated_counties = 0  #: init to 0 in case no adds necessary
+    if not new_data_df.empty:
+        #: Speedtest data
+        added_features = _update_speedtest_points(gis, new_data_df)
+        module_logger.debug('%s speedtest points added', added_features)
 
-        #: Filter out existing and institutional records
-        new_data_df = speedtest_df[~speedtest_df['id'].isin(list(live_df['id']))]
-        if config.INSTITUTIONS_TO_REMOVE:
-            new_data_df = new_data_df[~new_data_df['ispinfo'].isin(config.INSTITUTIONS_TO_REMOVE)].copy()
-            new_data_df.reset_index(inplace=True, drop=True)
-            new_data_df.spatial.set_geometry('SHAPE')
-
-        added_features = updated_counties = 0  #: init to 0 in case no adds necessary
-        if not new_data_df.empty:
-            #: Speedtest data
-            added_features = _update_speedtest_points(gis, new_data_df)
-            module_logger.debug('%s speedtest points added', added_features)
-
-            #: County Summaries
-            updated_counties = _update_counties(gis, speedtest_df)
-            module_logger.debug('%s county summaries updated', updated_counties)
-
-        end = datetime.now()
-
-        summary_message = MessageDetails()
-        summary_message.subject = f'{config.SKID_NAME} Update Summary'
-        summary_rows = [
-            f'{config.SKID_NAME} update {start.strftime("%Y-%m-%d")}',
-            '=' * 20,
-            '',
-            f'Start time: {start.strftime("%H:%M:%S")}',
-            f'End time: {end.strftime("%H:%M:%S")}',
-            f'Duration: {str(end-start)}',
-            f'{added_features} new points added',
-            f'{updated_counties} counties\' summaries updated',
-        ]
-
-        summary_message.message = '\n'.join(summary_rows)
-        summary_message.attachments = tempdir_path / log_name
-
-        skid_supervisor.notify(summary_message)
-
-        #: Remove file handler so the tempdir will close properly
-        loggers = [logging.getLogger(config.SKID_NAME), logging.getLogger('palletjack')]
-        _remove_log_file_handlers(log_name, loggers)
+        #: County Summaries
+        updated_counties = _update_counties(gis, speedtest_df)
+        module_logger.debug('%s county summaries updated', updated_counties)
 
 
 def main(event, context):  # pylint: disable=unused-argument
