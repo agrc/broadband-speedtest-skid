@@ -23,9 +23,14 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: 3.8
+          python-version: 3.9
           # cache: pip
           # cache-dependency-path: setup.py
+
+      - name: Install libkrb5 for Kerberos on Linux
+        run: |
+          sudo apt install -y libkrb5-dev
+          pip install requests-kerberos
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -37,7 +42,7 @@ jobs:
         run: pytest
 
   deploy-dev:
-    name: Deploy to GCF
+    name: Deploy to GCF (dev)
     needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/dev'
@@ -66,10 +71,10 @@ jobs:
         id: deploy
         uses: google-github-actions/deploy-cloud-functions@v1
         with:
-          name: projectname-skid
-          runtime: python38
+          name: speedtest-skid
+          runtime: python39
           entry_point: main
-          source_dir: src/skidname
+          source_dir: src/bb_speed
           service_account_email: cloud-function-sa@${{ secrets.PROJECT_ID }}.iam.gserviceaccount.com
           event_trigger_type: providers/cloud.pubsub/eventTypes/topic.publish
           event_trigger_resource: projects/${{ secrets.PROJECT_ID }}/topics/monday-morning-topic
@@ -78,7 +83,7 @@ jobs:
           timeout: 240
           env_vars: STORAGE_BUCKET=${{secrets.STORAGE_BUCKET}}
           secret_volumes: |
-            /secrets/app/secrets.json=${{secrets.PROJECT_ID}}/app_secrets
+            /secrets/app/secrets.json=${{secrets.PROJECT_ID}}/skid_secrets
 
       - name: 📥 Create PubSub topic
         run: |
@@ -90,7 +95,7 @@ jobs:
         run: |
           if [ ! "$(gcloud scheduler jobs list --location=us-central1 | grep monday-morning)" ]; then
             gcloud scheduler jobs create pubsub monday-morning \
-              --description="Trigger the projectname-skid bot once a week on monday morning" \
+              --description="Trigger the speedtest-skid bot once a week on monday morning" \
               --schedule="0 9 * * 1" \
               --time-zone=America/Denver \
               --location=us-central1 \
@@ -99,7 +104,7 @@ jobs:
               --quiet
           else
             gcloud scheduler jobs update pubsub monday-morning \
-              --description="Trigger the projectname-skid bot once a week on monday morning" \
+              --description="Trigger the speedtest-skid bot once a week on monday morning" \
               --schedule="0 9 * * 1" \
               --time-zone=America/Denver \
               --location=us-central1 \
@@ -109,7 +114,7 @@ jobs:
           fi
 
   deploy-prod:
-    name: Deploy to GCF
+    name: Deploy to GCF (prod)
     needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
@@ -136,7 +141,7 @@ jobs:
         id: deploy
         uses: google-github-actions/deploy-cloud-functions@v1
         with:
-          name: projectname-skid
+          name: speedtest-skid
           runtime: python38
           entry_point: main
           source_dir: src/projectname
@@ -161,7 +166,7 @@ jobs:
         run: |
           if [ ! "$(gcloud scheduler jobs list --location=us-central1 | grep monday-morning)" ]; then
             gcloud scheduler jobs create pubsub monday-morning \
-              --description="Trigger the projectname-skid bot once a week on monday morning" \
+              --description="Trigger the speedtest-skid bot once a week on monday morning" \
               --schedule="0 9 * * 1" \
               --time-zone=America/Denver \
               --location=us-central1 \
@@ -170,7 +175,7 @@ jobs:
               --quiet
           else
             gcloud scheduler jobs update pubsub monday-morning \
-              --description="Trigger the projectname-skid bot once a week on monday morning" \
+              --description="Trigger the speedtest-skid bot once a week on monday morning" \
               --schedule="0 9 * * 1" \
               --time-zone=America/Denver \
               --location=us-central1 \
