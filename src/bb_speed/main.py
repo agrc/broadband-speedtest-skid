@@ -145,9 +145,10 @@ def process():
 
         module_logger.info('Loading new and live data...')
         live_df = transform.FeatureServiceMerging.get_live_dataframe(gis, config.FEATURE_LAYER_ITEMID)
-        latest_id = live_df['id'].max()
-        new_data_df = _load_speedtest_data(config.SPEEDTEST_BASE_URL, {'state': 'Utah', 'record': f'{latest_id+1}'})
-        # new_data_df = speedtest_df[~speedtest_df['id'].isin(list(live_df['id']))]
+        # latest_id = live_df['id'].max()
+        # new_data_df = _load_speedtest_data(config.SPEEDTEST_BASE_URL, {'state': 'Utah', 'record': f'{latest_id+1}'})
+        speedtest_df = _load_speedtest_data(config.SPEEDTEST_BASE_URL, {'state': 'Utah', 'record': '0'})
+        new_data_df = speedtest_df[~speedtest_df['id'].isin(list(live_df['id']))]
 
         module_logger.info('Classifying and cleaning new data...')
         cleaned_df = _classify_speedtest_data(new_data_df)
@@ -317,11 +318,68 @@ def _load_census_data(base_url, params):
     response = requests.get(base_url, params=params, timeout=60)
     dataframe = pd.DataFrame(response.json())
 
+    names_to_fips = {
+        'BEAVER': '49001',
+        'BOX ELDER': '49003',
+        'CACHE': '49005',
+        'CARBON': '49007',
+        'DAGGETT': '49009',
+        'DAVIS': '49011',
+        'DUCHESNE': '49013',
+        'EMERY': '49015',
+        'GARFIELD': '49017',
+        'GRAND': '49019',
+        'IRON': '49021',
+        'JUAB': '49023',
+        'KANE': '49025',
+        'MILLARD': '49027',
+        'MORGAN': '49029',
+        'PIUTE': '49031',
+        'RICH': '49033',
+        'SALT LAKE': '49035',
+        'SAN JUAN': '49037',
+        'SANPETE': '49039',
+        'SEVIER': '49041',
+        'SUMMIT': '49043',
+        'TOOELE': '49045',
+        'UINTAH': '49047',
+        'UTAH': '49049',
+        'WASATCH': '49051',
+        'WASHINGTON': '49053',
+        'WAYNE': '49055',
+        'WEBER': '49057'
+    }
+    # yapf: disable
+    fips_df = (pd.DataFrame.from_dict(names_to_fips, 'index', columns=['fips'])
+                .reset_index()
+                .rename(columns={'index': 'name'}))
+    # yapf: enable
+
     #: First row is the column names
     dataframe.columns = dataframe.iloc[0]
-    dataframe = dataframe[1:].copy()
+    dataframe = dataframe[1:].copy().reset_index(drop=True)
+    dataframe['cofips'] = dataframe['state'] + dataframe['county']
+
+    dataframe = dataframe.merge(fips_df, left_on='cofips', right_on='fips')
+    dataframe['name'] = dataframe['name'].str.title() + ' County'
+    dataframe.drop(columns=['state', 'county', 'cofips', 'fips'], inplace=True)
+    dataframe.rename(columns={'DP02_0001E': 'total_households'}, inplace=True)
 
     return dataframe
+
+
+def _calc_county_summary(household_df, all_tests_df):
+    # yapf: disable
+    county_summary = (pd.DataFrame(all_tests_df.groupby('county')['id'].count())
+                        .reset_index()
+                        .merge(household_df, left_on='county', right_on='name')
+                        .drop(columns=['name'])
+                        .rename(columns={'id': 'tests'}))
+    # yapf: enable
+    county_summary['total_households'] = county_summary['total_households'].astype(int)
+    county_summary['percent_response'] = county_summary['tests'] / county_summary['total_households']
+
+    return county_summary
 
 
 def testing():

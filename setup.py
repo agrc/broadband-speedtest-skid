@@ -41,6 +41,7 @@ setup(
         'arcgis==2.1.*',
         'ugrc-palletjack==3.0.*',
         'agrc-supervisor==3.0.*',
+        'h3==3.*',
     ],
     extras_require={
         'tests': [
