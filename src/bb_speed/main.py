@@ -198,8 +198,8 @@ def process():
         skid_supervisor = _initialize(log_path, secrets.SENDGRID_API_KEY)
 
         #: Get our GIS object via the ArcGIS API for Python
-        # gis = arcgis.gis.GIS(config.AGOL_ORG, secrets.AGOL_USER, secrets.AGOL_PASSWORD)
-        gis = arcgis.gis.GIS(config.AGOL_ORG, secrets.AGOL_USER)
+        gis = arcgis.gis.GIS(config.AGOL_ORG, secrets.AGOL_USER, secrets.AGOL_PASSWORD)
+        # gis = arcgis.gis.GIS(config.AGOL_ORG, secrets.AGOL_USER)
 
         module_logger.info('Loading new and live speedtest data...')
         live_df = transform.FeatureServiceMerging.get_live_dataframe(gis, config.FEATURE_LAYER_ITEMID)
