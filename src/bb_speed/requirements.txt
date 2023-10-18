@@ -3,3 +3,6 @@ ugrc-palletjack==3.0.*
 arcgis==2.1.*
 google-cloud-storage==2.3.*
 h3==3.*
+notebook==6.5.4
+ipykernel==6.23.1
+
