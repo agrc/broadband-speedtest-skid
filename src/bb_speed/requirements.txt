@@ -1,5 +1,5 @@
 pandas==1.5.*
-arcgis==2.1.0.2
+arcgis==2.1.0.3
 ugrc-palletjack==3.0.*
 google-cloud-storage==2.3.*
 h3==3.*
