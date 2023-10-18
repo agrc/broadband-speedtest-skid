@@ -1,0 +1,5 @@
+agrc-supervisor==3.0.*
+ugrc-palletjack==3.0.*
+arcgis==2.1.*
+google-cloud-storage==2.3.*
+h3==3.*
