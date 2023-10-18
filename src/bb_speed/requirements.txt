@@ -1,6 +1,6 @@
-agrc-supervisor==3.0.*
+pandas==1.5.*
+arcgis==2.1.0.2
 ugrc-palletjack==3.0.*
-arcgis==2.1.*
 google-cloud-storage==2.3.*
 h3==3.*
 notebook==6.5.4
