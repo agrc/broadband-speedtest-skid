@@ -81,7 +81,7 @@ jobs:
         uses: google-github-actions/deploy-cloud-functions@v3
         timeout-minutes: 15
         with:
-          name: speedtest-skid
+          name: speedtest-skid-gen2
           runtime: python311
           entry_point: main
           source_dir: src/bb_speed
