@@ -12,7 +12,7 @@ on:
 
 env:
   CLOUD_FUNCTION_MEMORY: 1024Mb
-  CLOUD_FUCNTION_RUN_TIMEOUT: 240s
+  CLOUD_FUNCTION_RUN_TIMEOUT: 240s
   SCHEDULE_NAME: monday-morning
   SCHEDULE_CRON: 0 9 * * 1
   SCHEDULE_DESCRIPTION: "Trigger the speedtest-skid bot once a week on monday morning"
