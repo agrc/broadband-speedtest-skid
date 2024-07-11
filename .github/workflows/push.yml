@@ -10,6 +10,13 @@ on:
       - main
       - dev
 
+env:
+  CLOUD_FUNCTION_MEMORY: 1024Mb
+  CLOUD_FUCNTION_RUN_TIMEOUT: 240s
+  SCHEDULE_NAME: monday-morning
+  SCHEDULE_CRON: 0 9 * * 1
+  SCHEDULE_DESCRIPTION: "Trigger the speedtest-skid bot once a week on monday morning"
+
 concurrency:
   group: "${{ github.head_ref || github.ref }}"
   cancel-in-progress: true
@@ -20,20 +27,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
-          python-version: 3.9
-          # cache: pip
-          # cache-dependency-path: setup.py
+          show-progress: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+          cache: pip
+          cache-dependency-path: setup.py
 
       - name: Install libkrb5 for Kerberos on Linux
         run: |
+          sudo apt update
           sudo apt install -y libkrb5-dev
-          pip install requests-kerberos
-
-      - name: Checkout code
-        uses: actions/checkout@v4
 
       - name: Install module
         run: pip install .[tests]
@@ -60,7 +69,7 @@ jobs:
 
       - name: 🗝️ Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v1
+        uses: google-github-actions/auth@v2
         with:
           create_credentials_file: true
           token_format: access_token
@@ -69,49 +78,43 @@ jobs:
 
       - name: 🚀 Deploy to Cloud Function
         id: deploy
-        uses: google-github-actions/deploy-cloud-functions@v1
+        uses: google-github-actions/deploy-cloud-functions@v3
+        timeout-minutes: 15
         with:
           name: speedtest-skid
-          runtime: python39
+          runtime: python311
           entry_point: main
           source_dir: src/bb_speed
-          service_account_email: cloud-function-sa@${{ secrets.PROJECT_ID }}.iam.gserviceaccount.com
-          event_trigger_type: providers/cloud.pubsub/eventTypes/topic.publish
-          event_trigger_resource: projects/${{ secrets.PROJECT_ID }}/topics/monday-morning-topic
-          deploy_timeout: 720
-          memory_mb: 1024
-          timeout: 240
-          env_vars: STORAGE_BUCKET=${{secrets.STORAGE_BUCKET}}
-          secret_volumes: |
+          service_account: cloud-function-sa@${{ secrets.PROJECT_ID }}.iam.gserviceaccount.com
+          event_trigger_type: google.cloud.pubsub.topic.v1.messagePublished
+          event_trigger_pubsub_topic: projects/${{ secrets.PROJECT_ID }}/topics/${{ env.SCHEDULE_NAME }}-topic
+          memory: ${{ env.CLOUD_FUNCTION_MEMORY }}
+          service_timeout: ${{ env.CLOUD_FUNCTION_RUN_TIMEOUT }}
+          environment_variables: STORAGE_BUCKET=${{secrets.STORAGE_BUCKET}}
+          secrets: |
             /secrets/app/secrets.json=${{secrets.PROJECT_ID}}/skid-secrets
+          max_instance_count: 1
+          event_trigger_retry: false
 
       - name: 📥 Create PubSub topic
         run: |
-          if [ ! "$(gcloud pubsub topics list | grep monday-morning-topic)" ]; then
-            gcloud pubsub topics create monday-morning-topic --quiet
+          if [ ! "$(gcloud pubsub topics list | grep $SCHEDULE_NAME-topic)" ]; then
+            gcloud pubsub topics create $SCHEDULE_NAME-topic --quiet
           fi
 
       - name: 🕰️ Create Cloud Scheduler
         run: |
-          if [ ! "$(gcloud scheduler jobs list --location=us-central1 | grep monday-morning)" ]; then
-            gcloud scheduler jobs create pubsub monday-morning \
-              --description="Trigger the speedtest-skid bot once a week on monday morning" \
-              --schedule="0 9 * * 1" \
-              --time-zone=America/Denver \
-              --location=us-central1 \
-              --topic=monday-morning-topic \
-              --message-body='{"run": "now"}' \
-              --quiet
-          else
-            gcloud scheduler jobs update pubsub monday-morning \
-              --description="Trigger the speedtest-skid bot once a week on monday morning" \
-              --schedule="0 9 * * 1" \
-              --time-zone=America/Denver \
-              --location=us-central1 \
-              --topic=monday-morning-topic \
-              --message-body='{"run": "now"}' \
-              --quiet
-          fi
+          for i in $(gcloud scheduler jobs list --location=us-central1 --uri); do
+            gcloud scheduler jobs delete $i --quiet
+          done
+          gcloud scheduler jobs create pubsub $SCHEDULE_NAME \
+            --description="$SCHEDULE_DESCRIPTION" \
+            --schedule="$SCHEDULE_CRON" \
+            --time-zone=America/Denver \
+            --location=us-central1 \
+            --topic=$SCHEDULE_NAME-topic \
+            --message-body='{"run": "now"}' \
+            --quiet
 
   deploy-prod:
     name: Deploy to GCF (prod)
@@ -130,7 +133,7 @@ jobs:
 
       - name: 🗝️ Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v1
+        uses: google-github-actions/auth@v2
         with:
           create_credentials_file: true
           token_format: access_token
