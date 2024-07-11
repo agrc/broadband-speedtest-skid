@@ -1,3 +1,7 @@
+# Broadband Speedtest Skid
+
+Archived in July 2024 per https://github.com/agrc/porter/issues/330. Never made it out of development. Current work is in the `dev` branch.
+
 # UGRC Palletjack Skid Starter Tempalate
 
 [![Push Events](https://github.com/agrc/broadband-speedtest-skid/actions/workflows/push.yml/badge.svg)](https://github.com/agrc/broadband-speedtest-skid/actions/workflows/push.yml)
