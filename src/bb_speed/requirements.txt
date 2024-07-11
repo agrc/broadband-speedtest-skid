@@ -1,8 +1,7 @@
-pandas==1.5.*
-arcgis==2.1.0.3
-ugrc-palletjack==3.0.*
-google-cloud-storage==2.3.*
+ugrc-palletjack==4.4.*
+agrc-supervisor==3.0.3
+google-cloud-storage==2.16.*
 h3==3.*
-notebook==6.5.4
-ipykernel==6.23.1
+# notebook==6.5.4
+# ipykernel==6.23.1
 
